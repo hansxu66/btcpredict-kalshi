@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trading Dashboard</title>
+    <style>
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #21262d;
+            --text-primary: #f0f6fc;
+            --text-secondary: #8b949e;
+            --border-color: #30363d;
+            --accent-green: #3fb950;
+            --accent-red: #f85149;
+            --accent-blue: #58a6ff;
+            --accent-yellow: #d29922;
+            --accent-purple: #a371f7;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+
+        .header {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--accent-red);
+        }
+
+        .status-dot.connected {
+            background: var(--accent-green);
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+        }
+
+        .panel {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            margin-bottom: 1.5rem;
+            overflow: hidden;
+        }
+
+        .panel-header {
+            background: var(--bg-tertiary);
+            padding: 1rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .panel-header h2 {
+            font-size: 1.1rem;
+            font-weight: 600;
+        }
+
+        .panel-content {
+            padding: 1.5rem;
+        }
+
+        .ticker-id {
+            font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+            font-size: 1.2rem;
+            color: var(--accent-blue);
+            margin-bottom: 1.5rem;
+        }
+
+        .data-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1.5rem;
+        }
+
+        .data-item {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+
+        .data-label {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .data-value {
+            font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+            font-size: 1.5rem;
+            font-weight: 700;
+        }
+
+        .data-value.fair { color: var(--accent-purple); }
+        .data-value.kalshi { color: var(--accent-blue); }
+        .data-value.sportsbook { color: var(--accent-yellow); }
+        .data-value.std { color: var(--text-secondary); font-size: 1rem; }
+
+        .divider {
+            grid-column: 1 / -1;
+            border-top: 1px solid var(--border-color);
+            margin: 0.5rem 0;
+        }
+
+        .empty-state {
+            text-align: center;
+            color: var(--text-secondary);
+            padding: 2rem;
+        }
+
+        .log-panel {
+            font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+            font-size: 0.8rem;
+            max-height: 150px;
+            overflow-y: auto;
+            padding: 1rem;
+        }
+
+        .log-entry {
+            padding: 0.25rem 0;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .log-time {
+            color: var(--text-secondary);
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Trading Dashboard</h1>
+        <div class="status">
+            <div class="status-dot" id="statusDot"></div>
+            <span id="statusText">Disconnected</span>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Current Values Panel -->
+        <div class="panel">
+            <div class="panel-header">
+                <h2>Current Probabilities</h2>
+            </div>
+            <div class="panel-content" id="dataPanel">
+                <div class="empty-state">Waiting for data...</div>
+            </div>
+        </div>
+
+        <!-- Activity Log -->
+        <div class="panel">
+            <div class="panel-header">
+                <h2>Activity Log</h2>
+            </div>
+            <div class="log-panel" id="logPanel"></div>
+        </div>
+    </div>
+
+    <script>
+        // DOM Elements
+        const statusDot = document.getElementById('statusDot');
+        const statusText = document.getElementById('statusText');
+        const dataPanel = document.getElementById('dataPanel');
+        const logPanel = document.getElementById('logPanel');
+
+        // State
+        const logs = [];
+        let currentData = null;
+
+        // Format percentage
+        function fmt(val, decimals = 1) {
+            if (val == null) return '--';
+            return (val * 100).toFixed(decimals) + '%';
+        }
+
+        // Update display with current data
+        function updateDisplay(data) {
+            if (!data) {
+                dataPanel.innerHTML = '<div class="empty-state">Waiting for data...</div>';
+                return;
+            }
+
+            currentData = data;
+
+            dataPanel.innerHTML = `
+                <div class="ticker-id">${data.ticker_id || 'Unknown'}</div>
+                <div class="data-grid">
+                    <div class="data-item">
+                        <span class="data-label">Fair Price</span>
+                        <span class="data-value fair">${fmt(data.fair_price, 2)}</span>
+                    </div>
+                    <div class="data-item">
+                        <span class="data-label">Fair Std Dev</span>
+                        <span class="data-value std">${fmt(data.fair_std, 2)}</span>
+                    </div>
+
+                    <div class="divider"></div>
+
+                    <div class="data-item">
+                        <span class="data-label">Kalshi YES</span>
+                        <span class="data-value kalshi">${fmt(data.kalshi_prob)}</span>
+                    </div>
+                    <div class="data-item">
+                        <span class="data-label">Kalshi NO</span>
+                        <span class="data-value kalshi">${fmt(data.kalshi_no_prob)}</span>
+                    </div>
+
+                    <div class="divider"></div>
+
+                    <div class="data-item">
+                        <span class="data-label">Sportsbook Home/YES</span>
+                        <span class="data-value sportsbook">${fmt(data.sportsbook_avg)}</span>
+                        <span class="data-value std">std ${fmt(data.sportsbook_std, 2)}</span>
+                    </div>
+                    <div class="data-item">
+                        <span class="data-label">Sportsbook Away/NO</span>
+                        <span class="data-value sportsbook">${fmt(data.sportsbook_away_avg)}</span>
+                        <span class="data-value std">std ${fmt(data.sportsbook_away_std, 2)}</span>
+                    </div>
+
+                    <div class="divider"></div>
+
+                    <div class="data-item">
+                        <span class="data-label">Sources</span>
+                        <span class="data-value std">${data.source_count || '--'}</span>
+                    </div>
+                    <div class="data-item">
+                        <span class="data-label">Last Update</span>
+                        <span class="data-value std">${new Date().toLocaleTimeString()}</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Add log entry
+        function addLog(message) {
+            const time = new Date().toLocaleTimeString();
+            logs.unshift({ time, message });
+            if (logs.length > 50) logs.pop();
+
+            logPanel.innerHTML = logs.map(log => `
+                <div class="log-entry">
+                    <span class="log-time">${log.time}</span> ${log.message}
+                </div>
+            `).join('');
+        }
+
+        // WebSocket connection
+        let ws = null;
+
+        function connect() {
+            const wsUrl = `ws://${window.location.host}/ws`;
+            console.log('Connecting to', wsUrl);
+
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                console.log('WebSocket connected');
+                statusDot.classList.add('connected');
+                statusText.textContent = 'Connected';
+                addLog('Connected to server');
+            };
+
+            ws.onclose = () => {
+                console.log('WebSocket disconnected');
+                statusDot.classList.remove('connected');
+                statusText.textContent = 'Disconnected';
+                addLog('Disconnected from server');
+                setTimeout(connect, 3000);
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const message = JSON.parse(event.data);
+                    handleMessage(message);
+                } catch (e) {
+                    console.error('Failed to parse message:', e);
+                }
+            };
+        }
+
+        function handleMessage(message) {
+            console.log('[WS] Received:', message.type, message);
+
+            if (message.type === 'state_snapshot') {
+                // Load initial state
+                if (message.data.calculator) {
+                    const tickers = Object.keys(message.data.calculator);
+                    if (tickers.length > 0) {
+                        updateDisplay(message.data.calculator[tickers[0]]);
+                    }
+                }
+                addLog('Received state snapshot');
+
+            } else if (message.type === 'update' && message.source === 'calculator') {
+                updateDisplay(message.data);
+                const fairStr = message.data.fair_price != null
+                    ? (message.data.fair_price * 100).toFixed(1) + '%'
+                    : '--';
+                addLog(`Update: fair=${fairStr}`);
+            }
+        }
+
+        // Initialize
+        connect();
+
+        // Ping to keep connection alive
+        setInterval(() => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send('ping');
+            }
+        }, 30000);
+    </script>
+</body>
+</html>
